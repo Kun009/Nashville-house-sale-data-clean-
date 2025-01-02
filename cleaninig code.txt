@@ -1,0 +1,108 @@
+-- Create the schema Nashville_Data if it does not exist
+CREATE SCHEMA IF NOT EXISTS Nashville_Data;
+
+-- Create the housesales table under the Nashville_Data schema
+CREATE TABLE IF NOT EXISTS Nashville_Data.housesales (
+    UniqueID VARCHAR(255),         -- Unique identifier for the sale
+    ParcelID VARCHAR(255),         -- Parcel identification number
+    LandUse VARCHAR(255),          -- Land usage type
+    PropertyAddress VARCHAR(255),  -- Address of the property
+    SaleDate VARCHAR(255),         -- Date of sale
+    SalePrice VARCHAR(255),        -- Sale price of the property
+    LegalReference VARCHAR(255),   -- Legal reference for the transaction
+    SoldAsVacant VARCHAR(255),     -- Indicates if sold as vacant (Yes/No)
+    OwnerName VARCHAR(255),        -- Name of the property owner
+    OwnerAddress VARCHAR(255),     -- Address of the property owner
+    Acreage VARCHAR(255),          -- Acreage of the property
+    TaxDistrict VARCHAR(255),      -- Tax district information
+    LandValue VARCHAR(255),        -- Value of the land
+    BuildingValue VARCHAR(255),    -- Value of the building
+    TotalValue VARCHAR(255),       -- Total assessed value of the property
+    YearBuilt VARCHAR(255),        -- Year the property was built
+    Bedrooms VARCHAR(255),         -- Number of bedrooms
+    FullBath VARCHAR(255),         -- Number of full bathrooms
+    HalfBath VARCHAR(255)          -- Number of half bathrooms
+);
+
+
+-- Convert date to standard date 
+UPDATE Nashville_Data.housesales
+SET SaleDate = TO_CHAR(TO_DATE(SaleDate, 'Month DD, YYYY'), 'YYYY-MM-DD');
+
+-- Update the ParcelID column to remove alphabet characters
+UPDATE Nashville_Data.housesales
+SET ParcelID = REGEXP_REPLACE(ParcelID, '[A-Za-z]', '', 'g');
+
+-- SQL Query to Update SoldAsVacant Column
+sql
+Copy code
+UPDATE Nashville_Data.housesales
+SET SoldAsVacant = CASE
+    WHEN SoldAsVacant = 'N' THEN 'No'
+    WHEN SoldAsVacant = 'Y' THEN 'Yes'
+    ELSE SoldAsVacant
+END;
+
+-- First, add the new columns to store the split address components
+ALTER TABLE nashville_data.housesales
+ADD COLUMN ownerstreet VARCHAR(255),
+ADD COLUMN ownercity VARCHAR(100),
+ADD COLUMN ownerstate VARCHAR(50);
+
+-- Update the new columns with split data
+-- Assuming the address format is "street, city, state"
+UPDATE nashville_data.housesales
+SET 
+    ownerstreet = SPLIT_PART(owneraddress, ',', 1),
+    ownercity = TRIM(SPLIT_PART(owneraddress, ',', 2)),
+    ownerstate = TRIM(SPLIT_PART(owneraddress, ',', 3));
+SELECT owneraddress, ownerstreet, ownercity, ownerstate
+FROM nashville_data.housesales
+LIMIT 5;
+
+-- Optional: If you want to drop the original column after verification
+-- ALTER TABLE nashville_data.housesales DROP COLUMN owneraddress;
+-- SQL Query to Fix Null Values in PropertyAddress and PropertyCity
+UPDATE Nashville_Data.housesales AS target
+SET PropertyAddress = source.PropertyAddress,
+    PropertyCity = source.PropertyCity
+FROM Nashville_Data.housesales AS source
+WHERE target.ParcelID = source.ParcelID
+  AND target.PropertyAddress IS NULL
+  AND target.PropertyCity IS NULL
+  AND source.PropertyAddress IS NOT NULL
+  AND source.PropertyCity IS NOT NULL;
+
+
+-- First, let's create a backup of the table (recommended before deletion)
+CREATE TABLE nashville_data.housesales_backup AS
+SELECT * FROM nashville_data.housesales;
+
+-- Delete duplicates using CTEs
+WITH DuplicateCTE AS (
+    SELECT *,
+        ROW_NUMBER() OVER(
+            PARTITION BY 
+                ParcelID,
+                PropertyAddress,
+                SalePrice,
+                SaleDate,
+                LegalReference
+            ORDER BY 
+                UniqueID
+        ) AS row_num
+    FROM nashville_data.housesales
+)
+DELETE FROM nashville_data.housesales
+WHERE UniqueID IN (
+    SELECT UniqueID 
+    FROM DuplicateCTE 
+    WHERE row_num > 1
+);
+
+-- Verify the deletion
+SELECT COUNT(*) FROM nashville_data.housesales;
+
+-- If something goes wrong, you can restore from backup using:
+-- DROP TABLE nashville_data.housesales;
+-- ALTER TABLE nashville_data.housesales_backup RENAME TO housesales;
